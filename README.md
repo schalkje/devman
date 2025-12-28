@@ -2,7 +2,7 @@
 
 Hey fellow devs,
 
-This is my personal collection of quick fixes, cheatsheets, and reminders for common developer problems. I built this for myself to save time on repetitive issues, but you're welcome to pick and choose — copy, fork, or contribute if you find it useful.
+This is my personal collection of quick fixes, cheat sheets, and reminders for common developer problems. I built this for myself to save time on repetitive issues, but you're welcome to pick and choose — copy, fork, or contribute if you find it useful.
 
 ## What's Here
 
