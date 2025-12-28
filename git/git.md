@@ -1,5 +1,7 @@
 # GIT
 
+- [Git worktrees](./worktrees.md)
+
 ## Create a new git repo
 
 This section explains how to initialize a new local Git repository in an existing folder and ensure the initial branch is named `main`.
@@ -60,4 +62,5 @@ If you already have a local repository and want to rename the current default br
    ```
 
 3. On GitHub, go to the repository settings and set `main` as the default branch, then delete `master` if desired.
+
 
