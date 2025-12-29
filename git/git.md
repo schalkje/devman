@@ -1,6 +1,8 @@
 # GIT
 
-- [Git worktrees](./worktrees.md)
+- [New repo](#create-a-new-git-repo) - create a new repo and upload to GitHub
+- [Worktrees](./worktrees.md) -  multiple branches checked out simultaneously in different directories
+- [Stash](./stash.md) - temporarily save changes that are not yet ready to be committed
 
 ## Create a new git repo
 
