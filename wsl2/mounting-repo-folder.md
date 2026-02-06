@@ -48,50 +48,130 @@ Suggested configuration:
 enabled = true
 mountFsTab = true
 options = "metadata,umask=22,fmask=11"
+mountFsTab = true
+
+[filesystem]
+umask = 22
 ```
 
 Notes:
-- `metadata` makes Linux permissions work on the Windows filesystem (WSL stores permission metadata alongside files).
-- `umask=22,fmask=11` yields typical permissions: directories `755`, files `644`.
+- `options = ...` affects how Windows drives (like `C:`) are mounted under `/mnt`.
+- `mountFsTab = true` (the default) tells WSL to process `/etc/fstab` at startup.
+- If you previously added something like `boot.options = ...`, remove it (see Troubleshooting below).
 
-2) Add a mount entry to `/etc/fstab`
-
-Edit `/etc/fstab`:
+#### Add to `/etc/fstab`
+Open the `/etc/fstab` file:
 ```bash
 sudo nano /etc/fstab
 ```
 
-Add a line like this (replace `<your-user>` with your Linux username):
-```
-C:/repo /home/<your-user>/repo drvfs metadata,umask=22,fmask=11 0 0
-```
+Add a line to mount the folder automatically.
 
 Important:
-- Don’t use `$(whoami)` in `/etc/fstab`. It will not be expanded.
-- If you use a different location, make sure the mount point exists (`mkdir -p ...`).
+- `$(whoami)` does NOT work in `/etc/fstab` (it will be treated as literal text and the mount will fail).
+- Use your actual Linux username in the path.
 
-3) Restart WSL
+Example (replace `<linux-user>`):
+```
+C:/repo /home/<linux-user>/repo drvfs metadata,umask=22,fmask=11 0 0
+```
 
-From Windows PowerShell / CMD:
-```powershell
+Tip: confirm your Linux username with:
+```bash
+whoami
+```
+
+### Restart WSL
+Finally, restart WSL to apply the changes.
+
+Run this from Windows (PowerShell / CMD), not inside WSL:
+```bash
 wsl --shutdown
 ```
 
-Then open your distro again. `~/repo` should now be mounted automatically.
+After restarting WSL, the folder `~/repo` will automatically mount to `C:\repo`.
 
-## Option B — Symlink `~/repo` to `/mnt/c/repo` (simple, no sudo)
+## Option B — Mount to `/mnt/repo` + Symlink into `~/repo` (No Username in `/etc/fstab`)
 
-If you don’t need a “real” mount and just want a convenient path, a symlink is often enough:
+If you want `~/repo` but don’t want to hardcode `/home/<linux-user>` in `/etc/fstab`, mount to a stable path under `/mnt` and then symlink.
 
+### 1️⃣ Create the Mount Point
 ```bash
-ln -s /mnt/c/repo ~/repo
+sudo mkdir -p /mnt/repo
 ```
 
-Pros: easy, no `sudo`, no fstab.
-Cons: you’re still working on `/mnt/c` (some tools may behave slightly differently).
+### 2️⃣ Add to `/etc/fstab`
+```bash
+sudo nano /etc/fstab
+```
+
+Add:
+```
+C:/repo /mnt/repo drvfs metadata,umask=22,fmask=11 0 0
+```
+
+### 3️⃣ Create the Home Shortcut
+```bash
+mkdir -p ~
+ln -sfn /mnt/repo ~/repo
+```
+
+### 4️⃣ Restart WSL (from Windows)
+```bash
+wsl --shutdown
+```
+
+After restarting, `~/repo` will point to `/mnt/repo`, which is mounted from `C:\repo`.
+
+---
 
 ## Troubleshooting
 
-- If WSL doesn’t mount your `fstab` entries, re-check `/etc/wsl.conf` has `mountFsTab = true`, then run `wsl --shutdown` again.
-- If the mount point is “busy” during unmount: close terminals/editors using the path, then retry `sudo umount ~/repo`.
-- If you care about Linux permissions in your repo, keep `metadata` enabled. Without it, everything tends to look like a fixed permission mask.
+### `wsl: Unknown key 'boot.options' in /etc/wsl.conf`
+This happens when `/etc/wsl.conf` contains a setting that WSL doesn’t support, e.g.:
+```
+[boot]
+options = "..."
+```
+
+Fix:
+- Edit `/etc/wsl.conf` and delete the `boot.options` line.
+- If you need boot-related settings, these are valid examples:
+	- Enable systemd:
+		```
+		[boot]
+		systemd = true
+		```
+	- Run a command on distro startup:
+		```
+		[boot]
+		command = /usr/local/bin/my-startup-script
+		```
+
+If your goal was to set kernel command-line options, that is configured in Windows via `.wslconfig` (not in `/etc/wsl.conf`).
+
+### `wsl: Processing /etc/fstab with mount -a failed`
+This means at least one line in `/etc/fstab` failed to mount.
+
+Quick checks:
+1) Verify the mount point exists:
+```bash
+mkdir -p ~/repo
+```
+
+2) Run mount with verbose output to see the failing line:
+```bash
+sudo mount -a -v
+```
+
+3) Common causes:
+- Using `$(whoami)` or other shell syntax in `/etc/fstab`
+- Typos in the Windows path (`C:/repo`) or the Linux path (`/home/<linux-user>/repo`)
+- Missing drive or folder on Windows
+
+If you want WSL to start cleanly while you debug, you can temporarily disable fstab processing by setting this in `/etc/wsl.conf`:
+```
+[automount]
+mountFsTab = false
+```
+Then restart WSL with `wsl --shutdown` (from Windows), fix `/etc/fstab`, and re-enable `mountFsTab`.
