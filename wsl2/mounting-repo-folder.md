@@ -1,57 +1,97 @@
 # Mounting a Repo Folder in Your Home Folder on WSL2
 
-## Option A — Mount `C:\repo` into Your Linux Home (BEST)
+By default, WSL exposes your Windows drives under `/mnt/<drive>` (for example: `C:\repo` is available at `/mnt/c/repo`).
 
-This is the clean and correct approach.
+Sometimes it’s nicer to work from a path in your Linux home folder (shorter paths, consistent tooling, and you can standardize on `~/repo`). This page shows a clean way to do that.
 
-### 1️⃣ Create a Mount Point
-Run the following command to create a mount point in your Linux home directory:
+## Option A — Mount `C:\repo` into `~/repo` (recommended)
+
+This creates a real mount so `~/repo` maps directly to `C:\repo`.
+
+### A1) One-time mount (until you restart WSL)
+
+1) Create the mount point:
 ```bash
 mkdir -p ~/repo
 ```
 
-### 2️⃣ Mount the Windows Folder
-Use the following command to mount the Windows folder into your Linux home directory:
+2) Mount the Windows folder:
 ```bash
 sudo mount -t drvfs C:/repo ~/repo
 ```
 
-Now, the folder `~/repo` in your Linux home directory will point to `C:\repo` on your Windows system.
+Verify:
+```bash
+ls -la ~/repo
+mount | grep -i "~/repo" || mount | grep -i " /home/" | grep -i repo
+```
 
-### 🔁 Make it Permanent (Recommended)
-To ensure the mount persists across WSL restarts, follow these steps:
+Unmount later if needed:
+```bash
+sudo umount ~/repo
+```
 
-#### Edit `/etc/wsl.conf`
-Open the WSL configuration file:
+### A2) Permanent mount (recommended)
+
+WSL can read `/etc/fstab` on startup, but only if you enable it.
+
+1) Enable fstab mounting and set sane defaults
+
+Edit `/etc/wsl.conf`:
 ```bash
 sudo nano /etc/wsl.conf
 ```
 
-Add the following lines to enable automounting with the correct options:
+Suggested configuration:
 ```
 [automount]
 enabled = true
+mountFsTab = true
 options = "metadata,umask=22,fmask=11"
-
-[filesystem]
-umask = 22
 ```
 
-#### Add to `/etc/fstab`
-Open the `/etc/fstab` file:
+Notes:
+- `metadata` makes Linux permissions work on the Windows filesystem (WSL stores permission metadata alongside files).
+- `umask=22,fmask=11` yields typical permissions: directories `755`, files `644`.
+
+2) Add a mount entry to `/etc/fstab`
+
+Edit `/etc/fstab`:
 ```bash
 sudo nano /etc/fstab
 ```
 
-Add the following line to mount the folder automatically:
+Add a line like this (replace `<your-user>` with your Linux username):
 ```
-C:/repo /home/$(whoami)/repo drvfs defaults 0 0
+C:/repo /home/<your-user>/repo drvfs metadata,umask=22,fmask=11 0 0
 ```
 
-### Restart WSL
-Finally, restart WSL to apply the changes:
-```bash
+Important:
+- Don’t use `$(whoami)` in `/etc/fstab`. It will not be expanded.
+- If you use a different location, make sure the mount point exists (`mkdir -p ...`).
+
+3) Restart WSL
+
+From Windows PowerShell / CMD:
+```powershell
 wsl --shutdown
 ```
 
-After restarting WSL, the folder `~/repo` will automatically mount to `C:\repo`.
+Then open your distro again. `~/repo` should now be mounted automatically.
+
+## Option B — Symlink `~/repo` to `/mnt/c/repo` (simple, no sudo)
+
+If you don’t need a “real” mount and just want a convenient path, a symlink is often enough:
+
+```bash
+ln -s /mnt/c/repo ~/repo
+```
+
+Pros: easy, no `sudo`, no fstab.
+Cons: you’re still working on `/mnt/c` (some tools may behave slightly differently).
+
+## Troubleshooting
+
+- If WSL doesn’t mount your `fstab` entries, re-check `/etc/wsl.conf` has `mountFsTab = true`, then run `wsl --shutdown` again.
+- If the mount point is “busy” during unmount: close terminals/editors using the path, then retry `sudo umount ~/repo`.
+- If you care about Linux permissions in your repo, keep `metadata` enabled. Without it, everything tends to look like a fixed permission mask.
