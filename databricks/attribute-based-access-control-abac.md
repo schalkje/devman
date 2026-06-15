@@ -568,6 +568,10 @@ flowchart LR
 > "On the corporate VPN" must not imply "may read PII." That is exactly the conflation
 > ABAC is designed to eliminate — segment the network *and* govern the data.
 
+To confirm these network controls are *actually* in place across every workspace (and to
+catch drift), use the **Security Analysis Tool's** *Network Security* checks and live
+egress testing — see **§14**.
+
 ---
 
 ## 10. The power of ABAC
@@ -662,6 +666,9 @@ Be honest about the boundaries — ABAC is powerful but not magic.
       stay consistent.
 - [ ] Test policies as the *target principal* (use `EXCEPT` lists carefully) and watch the
       relevant **system tables / audit logs**.
+- [ ] Run the **Security Analysis Tool (SAT)** on a daily schedule to *continuously verify*
+      that ABAC, network, identity, and data-protection controls are actually configured
+      across every workspace, and to track posture trends over time (see §14).
 
 ---
 
@@ -679,6 +686,129 @@ Be honest about the boundaries — ABAC is powerful but not magic.
 
 ---
 
+## 14. Verifying your posture: the Security Analysis Tool (SAT)
+
+Everything above is a set of **preventive** controls — ABAC decides what data a query
+returns, network segmentation decides what's reachable. But preventive controls only
+help if they're **actually configured, everywhere, and stay that way**. That is a
+*detective* problem, and it's exactly what the
+**[Security Analysis Tool (SAT)](https://github.com/databricks-industry-solutions/security-analysis-tool)**
+solves.
+
+### 14.1 What SAT is
+
+SAT is an **open-source Databricks Industry Solutions** project (predominantly Python
+with a Terraform deployment) that *"analyzes a customer's Databricks account and
+workspace security configurations and provides recommendations that help them follow
+Databricks' security best practices."* When you run it, it **compares your actual
+configuration against a catalog of security best practices and delivers a scored
+report**.
+
+> ⚠️ SAT is provided for **exploration purposes only and is not covered by Databricks
+> SLAs / formal support** — raise problems as GitHub issues, not support tickets. Treat
+> it as a powerful internal assessment tool, not a contracted product.
+
+### 14.2 How SAT relates to ABAC — preventive vs. detective
+
+This is the key mental model: **ABAC *enforces* the rules; SAT *checks whether you set
+the rules up correctly* — and whether the rest of your security posture supports them.**
+They sit on opposite sides of the same governance loop.
+
+```mermaid
+flowchart LR
+    subgraph PREV["Preventive controls (enforce)"]
+        A[ABAC policies + governed tags]
+        G[Grants / privileges / RBAC]
+        N[Network segmentation + egress]
+        E[Encryption / secrets]
+    end
+    subgraph DET["Detective control (verify)"]
+        SAT[Security Analysis Tool]
+    end
+    PREV -->|reads config via REST APIs| SAT
+    SAT -->|findings + severity + recommendations| FIX[Remediate / tighten]
+    FIX -->|improves| PREV
+    SAT -->|persists to Delta| TREND[(Trend over time)]
+```
+
+Concretely, SAT answers questions that ABAC alone cannot, e.g.:
+
+- *Are there workspaces **not** on Unity Catalog* — where ABAC can't apply at all?
+- *Are sensitive controls (PrivateLink, network policies, IP access lists) actually on*,
+  matching the §9 design — or did one workspace drift to a public configuration?
+- *Are permissions over-broad* relative to the separation-of-duties model in §7?
+- *Are there secrets in plaintext, weak encryption, or risky cluster/job settings?*
+
+So SAT is the auditor for **every layer this document describes** — it closes the loop by
+telling you whether your ABAC, identity, network, and data-protection design is real and
+intact, not just intended.
+
+### 14.3 What insight it gives
+
+- **60+ security best-practice checks** (growing each release), each with a
+  **severity** of **High / Medium / Low** and a **master checklist** that prioritizes by
+  severity.
+- Findings grouped into **five categories**:
+  1. **Network Security** — connectivity, PrivateLink, egress, public exposure (maps to §9).
+  2. **Identity & Access** — authentication, permissions, group/principal hygiene (maps to §7).
+  3. **Data Protection** — encryption, secrets management, data exposure.
+  4. **Governance** — Unity Catalog adoption, legacy/Hive metastore usage, audit/logging.
+  5. **Informational** — context that isn't a finding by itself.
+- A centralized **Databricks SQL dashboard** with a per-category breakdown and a
+  high-level posture overview, so different stakeholders can review the settings relevant
+  to them.
+- **Trend analysis**: scan results are persisted in **Delta tables**, so you can watch
+  security health improve (or regress) over time, not just at a single point.
+- Recent additions (v0.8.0, May 2026) include **live egress testing**, **per-user
+  identity in Permissions Analysis**, **expanded secret scanning**, and **11 new checks**.
+
+### 14.4 What control it gives
+
+SAT does **not** itself change settings — it's an assessment/observability layer, not an
+enforcement engine. The "control" it provides is **operational**: continuous,
+prioritized visibility that *drives* remediation and proves governance over time. In
+practice it gives you:
+
+- A **prioritized worklist** (by severity) of misconfigurations to fix.
+- A **drift detector** — catch a workspace that fell out of compliance after a change.
+- **Evidence for audits/compliance** that your preventive controls are actually in place.
+- A feedback signal that turns the one-time "we designed ABAC + network segmentation"
+  into an ongoing, measurable program.
+
+### 14.5 How it runs (deployment model)
+
+- **Multi-cloud**: supports **AWS, Azure, and GCP**.
+- **Installed and configured in a single workspace per account**; from there it collects
+  details about the account and **all other workspaces** — clusters, jobs, configs, etc.
+  — via the **Databricks REST APIs**.
+- Runs as an **automated Databricks Workflow (Job)**, **typically scheduled daily**, so
+  posture is re-assessed continuously.
+- Deployed via the project's notebooks + Terraform; results land in the DBSQL dashboard
+  and backing Delta tables.
+
+```mermaid
+flowchart TD
+    subgraph ACC["Databricks Account"]
+        HOST[SAT host workspace<br/>notebooks + daily Job]
+        W1[Workspace A]
+        W2[Workspace B]
+        W3[Workspace C]
+    end
+    HOST -->|REST API collect| W1
+    HOST -->|REST API collect| W2
+    HOST -->|REST API collect| W3
+    HOST --> DELTA[(Delta tables<br/>history)]
+    HOST --> DASH[DBSQL dashboard<br/>5 categories, severity]
+    DASH --> PEOPLE[Security / platform teams]
+```
+
+> **Where SAT fits in this document:** §1–§8 explain how ABAC *governs data*; §9 explains
+> how the network layer *constrains reachability*; **§14 (SAT) is how you continuously
+> verify both are configured correctly across every workspace in the account.** Preventive
+> controls keep you safe; SAT keeps you honest.
+
+---
+
 ## References
 
 - [Core concepts for ABAC — Databricks docs](https://docs.databricks.com/aws/en/data-governance/unity-catalog/abac/core-concepts)
@@ -693,6 +823,9 @@ Be honest about the boundaries — ABAC is powerful but not magic.
 - [Phase 4: Design network architecture — Microsoft Learn](https://learn.microsoft.com/en-us/azure/databricks/lakehouse-architecture/deployment-guide/network)
 - [Manage network policies for serverless egress control](https://docs.databricks.com/aws/en/security/network/serverless-network-security/manage-network-policies)
 - [Private Link concepts](https://docs.databricks.com/aws/en/security/network/concepts/privatelink-concepts)
+- [Security Analysis Tool (SAT) — GitHub repo](https://github.com/databricks-industry-solutions/security-analysis-tool)
+- [SAT documentation site](https://databricks-industry-solutions.github.io/security-analysis-tool/)
+- [Blog: Announcing the Security Analysis Tool (SAT)](https://www.databricks.com/blog/announcing-security-analysis-tool-sat)
 
 ---
 

@@ -4,9 +4,20 @@ Goal ABAC: prevent data duplication
 
 SE: You can just creat view too
 
+## Apply policies:
+
+Teraform or DAB
+
+use terraform policies to automatically generate...
+
+Governed tags are set at the corporate level? not on the lower levels.
+
+  
+
 ## questions
 
-- [ ] When is ABAC applicable andwhen not?
+- [ ] When is ABAC applicable and when not?
+- [ ] Why and when do we need terraform?
 - [ ] Is the tagging auditable over time?
   - [ ] How can I tell is a specific user had access to a data column/row 
     - [ ] at a certain point in time
@@ -16,7 +27,9 @@ SE: You can just creat view too
 
 - What are dynamic views?
 - How do you manage the tags?
-- How do you sepearate based on environment/workspace?
+- How do you separate based on environment/workspace?
+  - Can we separate on Azure subscription?
+  - 
 
 - How is ABAC is connected to users?
 
@@ -29,6 +42,8 @@ SE: You can just creat view too
 Tool: databricks **security analysis tool** put in the user names; show actual
 
 https://github.com/databricks-industry-solutions/security-analysis-tool/tree/main
+
+https://databricks-industry-solutions.github.io/security-analysis-tool/
 
 https://www.databricks.com/blog/2023/02/03/announcing-multi-cloud-support-security-analysis-tool-sat.html
 
