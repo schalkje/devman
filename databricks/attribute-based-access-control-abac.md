@@ -72,6 +72,82 @@ flowchart LR
 > See the [GA announcement blog](https://www.databricks.com/blog/abac-row-filtering-and-column-masking-policies-governed-tags-and-data-classification-are-now)
 > for the product screenshots.
 
+### 1.1 The three approaches, and how ABAC compares
+
+ABAC is not the first way to do row-level security (RLS) and column-level
+masking (CM) in Databricks. There are **three** approaches, two of them legacy:
+
+1. **Dynamic Views** (pre–Unity Catalog) — SQL views with security logic *baked into
+   the view definition* using identity functions like `current_user()`,
+   `is_member()`, and `is_account_group_member()`. Rows are filtered via `WHERE`
+   logic and columns masked via `CASE` logic. Not a separate security primitive — the
+   security *is* the view. Flexible, works on old runtimes, but: one view per table,
+   logic duplicated everywhere, no inheritance, hard to audit, and an extra layer of
+   view indirection that costs performance.
+
+2. **Legacy Row Filters & Column Masks** (Unity Catalog, `ALTER TABLE ... SET ROW FILTER`
+   / `SET COLUMN MASK`) — SQL UDFs attached *directly to a specific table or column*.
+   Fine-grained and still useful for one-off rules, but with hard limits:
+   **one row filter per table** and **one column mask per column**, **no inheritance**
+   (change = edit every table), limited reuse, scattered/hard-to-audit definitions, and
+   they require Databricks Runtime **12.2 LTS+**. They also **cannot be used with time
+   travel, path-based access, or Delta Sharing**.
+
+3. **ABAC policies** — central, tag-driven, attached once and inherited across the
+   hierarchy. The scalable, reusable, auditable option for enterprise governance.
+
+> Note the relationship: **ABAC row filters / column masks are the policy-driven,
+> inheriting evolution of the legacy per-table filters/masks** — same building block
+> (a UDF), but bound to *tags* and *attached high in the hierarchy* instead of welded to
+> one object.
+
+| Aspect | Dynamic Views | Legacy Row Filters / Column Masks | ABAC |
+|---|---|---|---|
+| Policy definition | Logic embedded in view SQL | Applied table-by-table, column-by-column | Defined centrally, applied via tags |
+| Scaling | Manual: N tables → N views | Manual: N tables → N configs | Automatic: tag tables → policy covers all |
+| Reusability | Duplicate logic per view | Recreate per table | One UDF reused across policies |
+| Inheritance | None | None | Catalog → Schema → Table → Column |
+| Auditability | Scattered across views | Scattered, hard to track | Centralized, easy to audit |
+| Hard limits | View indirection overhead | 1 filter/table, 1 mask/column; no time travel / path / (legacy) sharing | up to 3 column exprs per `MATCH COLUMNS`; tagging must be correct |
+| When to use | Legacy systems only | Narrow, one-off, or migration stopgap | Enterprise-scale governance |
+
+**Same requirement, two implementations** — *"analysts see only rows matching their
+region"*:
+
+```sql
+-- LEGACY RLS: repeat for EVERY table, one filter each
+CREATE FUNCTION region_filter_employees(region STRING) RETURNS BOOLEAN
+  RETURN IF(is_account_group_member('trusted'), TRUE, region = current_user_region());
+ALTER TABLE hr.employees   SET ROW FILTER region_filter_employees   ON (region);
+ALTER TABLE hr.contractors SET ROW FILTER region_filter_contractors ON (region);
+-- ...and again for every table that needs it
+```
+
+```sql
+-- ABAC: define once, apply everywhere via tags
+ALTER TABLE hr.employees   SET TAGS ('geo_region' = 'eu');
+ALTER TABLE hr.contractors SET TAGS ('geo_region' = 'us');
+
+CREATE OR REPLACE FUNCTION region_filter(region STRING) RETURNS BOOLEAN
+  RETURN IF(is_account_group_member('trusted'), TRUE, region = current_user_region());
+
+CREATE POLICY rf_region ON SCHEMA hr_catalog.hr   -- ONE policy governs all tagged tables
+  ROW FILTER region_filter
+  FOR TABLES
+  MATCH COLUMNS has_tag('geo_region') AS region
+  USING COLUMNS (region);
+```
+
+**Decision grid — when to use which:**
+
+- **Use ABAC when** classifications/regions/domains are modeled as tags across many
+  assets; you want central, reusable logic with broad catalog/schema coverage; you want
+  governance that table owners **cannot override**; or you need to **Delta-Share
+  ABAC-protected tables** (supported since **March 2026**).
+- **Use legacy table-level RLS/CM when** you have a narrow, table-specific exception or
+  temporary stopgap, or during a **hybrid migration** period coexisting with ABAC.
+- **Use Dynamic Views** only for legacy systems that can't adopt the above.
+
 ---
 
 ## 2. Core building blocks
@@ -334,6 +410,39 @@ flowchart TD
 | Data engineer | `CREATE` table | bypass inherited policies |
 | Analyst | `SELECT` | see unmasked/filtered data |
 
+In course/role terms: the **Governance (data) Engineer** *creates and attaches* policies
+(min privilege: `MANAGE` or ownership on the target object), and the **Analyst / Catalog
+Owner** *validates* the effective behavior.
+
+### 7.1 Where the permission model is heading (finer-grained privileges + RBAC)
+
+ABAC is one of **three governance pillars** that are co-evolving. The Unity Catalog
+privilege model is being decomposed for true least-privilege:
+
+- **`MANAGE` is splitting** into child privileges:
+  - **`MANAGE GRANTS`** — manage others' permissions without full ownership power
+    (for domain owners / data stewards).
+  - **`VIEW ADMIN METADATA`** — view access-control info and grants for debugging,
+    with no ability to change anything (for SREs / auditors).
+- **`MODIFY` is splitting** into **`INSERT`** (ingestion service principals write data
+  matching the current schema), **`UPDATE`** (append/rename/drop columns, change types),
+  and **`DELETE`** — combined, these enable `MERGE INTO`, CDC, and upserts.
+
+The third pillar, **RBAC with Exclusive Groups (Public Preview)**, complements
+permissions and ABAC:
+
+- **Exclusive groups** have *no permanent members*; a user **assumes** the role via a
+  `canAssume` permission.
+- While assumed, the user's *own* permissions are **blocked** — only the assumed group's
+  permissions apply.
+- A workspace **role-picker UI** lets users choose which role to assume (e.g.
+  `PII_viewer`, `Gov-Admin`).
+- Use cases: clinical-trial data access, multi-client consulting, restricted-data
+  investigations.
+
+> These are evolving/preview features — confirm current GA status and exact privilege
+> names before designing hard dependencies.
+
 ---
 
 ## 8. How ABAC works **across workspaces**
@@ -380,8 +489,10 @@ What this means in practice:
   governance. Multi-region governance means deliberately replicating policy definitions
   (e.g. via Terraform/IaC), not relying on automatic propagation.
 - **Cross-workspace/-region data sharing** (Delta Sharing) crosses the metastore
-  boundary; ABAC policies are enforced on the *provider* side, and the recipient governs
-  the shared-in data with its own metastore's tags and policies.
+  boundary. **Sharing ABAC-protected tables via Delta Sharing is supported since
+  March 2026** — a notable advantage over *legacy* row filters/column masks, which
+  **cannot** be used with Delta Sharing. Policies are enforced on the *provider* side,
+  and the recipient governs the shared-in data with its own metastore's tags and policies.
 
 > ⚠️ A consequence worth internalizing: **the metastore is the unit of consistency.**
 > "One source of truth for governance" is true *within a region*. Plan multi-region
@@ -493,7 +604,14 @@ Be honest about the boundaries — ABAC is powerful but not magic.
 - **Policies only restrict, never grant** (except the beta GRANT policy). Users still
   need base `SELECT`; ABAC is not an access-granting mechanism for row/column policies.
 - **Garbage in, garbage out.** Untagged or mis-tagged sensitive data is *not* protected.
-  ABAC's safety is exactly as good as your tagging/classification coverage.
+  ABAC's safety is exactly as good as your tagging/classification coverage. A **missing**
+  tag causes **over-access** (no filtering); a **wrong value** can cause **under-access**
+  (legitimate users blocked).
+- **Policy sprawl.** Too many overlapping policies make *effective access* hard to reason
+  about. Prefer **fewer, broader policies** attached high in the hierarchy.
+- **Mixed-model surprises.** When ABAC policies and direct (legacy) RLS/CM coexist on the
+  **same table**, their combination can follow **UNION-style semantics** and produce
+  unexpected results. Avoid stacking both on one object except briefly during migration.
 
 **Scope / matching limits**
 
@@ -550,9 +668,13 @@ Be honest about the boundaries — ABAC is powerful but not magic.
 ## 13. Requirements (at a glance)
 
 - **Unity Catalog**-enabled workspace assigned to a metastore.
-- Sufficient privileges per the separation-of-duties table (§7).
-- Compute that supports Unity Catalog governance (recent DBR / SQL warehouses);
-  confirm current minimums in the docs for filters/masks and GRANT policies.
+- **Governed Tags enabled** (GA).
+- Compute meeting the minimums: **Databricks Runtime ≥ 16.4** *or* **Serverless ≥
+  Version 4**. (For comparison, *legacy* table-level row filters/column masks need only
+  DBR **12.2 LTS+** — but lack inheritance and can't be Delta-Shared.)
+- Sufficient privileges per the separation-of-duties table (§7) — to create/attach a
+  policy you need **`MANAGE` (or ownership)** on the target object, plus `EXECUTE` on the
+  UDF.
 - For automatic tagging: **Data Classification** enabled at the account/metastore.
 
 ---
