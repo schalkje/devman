@@ -74,6 +74,32 @@ quality | 5
 topics | Unity Catalog
 url | https://www.databricks.com/dataaisummit/session/unity-catalog-advanced-field-proven-patterns-experts
 
+### Discussed capabilities and release status
+
+- Unity Catalog scaling patterns for operating model (centralized rules, decentralized execution): **GA**
+- Catalog organization patterns (1D, 2D, and hybrid dimensional layouts): **GA**
+- Team maturity operating models (autonomous ownership vs assisted sandbox): **GA**
+- System tables dashboards for asset activity, stale assets, grants, and adoption monitoring: **GA**
+- Governed tags as the security backbone for scalable controls: **GA**
+- Freeform tags (legacy/unregulated) and migration toward governed tags: **GA**
+- Segregation-of-duties model for tag creation, assignment, and governance stewardship: **GA**
+- Row filters and column masks via SQL UDFs at scale: **GA**
+- ABAC policies using include/except targeting and governed-tag matching: **GA**
+- ABAC performance patterns (deterministic logic, broadcastable mapping tables, policy simplification): **GA**
+- Predictive optimization for stats/maintenance to sustain policy-query performance: **GA**
+- AI-generated table and column comments: **GA**
+- Data classification (built-in classifiers): **GA**
+- Custom classifiers in data classification: **Beta**
+- Domains and discover experience for governed asset discovery: **Status not explicitly stated**
+- Certification signals to surface trusted assets in discovery: **Status not explicitly stated**
+- Genie grounded on Unity Catalog metadata and governed access controls: **GA**
+- AI governance extension via Unity AI Gateway (traffic controls and policy enforcement): **Status not explicitly stated**
+- AI Gateway service policies (MCP tool gating, input/output guardrails, custom policy functions): **Status not explicitly stated**
+- AI Gateway observability and cross-workspace cost/usage dashboards: **Status not explicitly stated**
+- Identity propagation for agent flows (end-user passthrough vs service principal patterns): **GA**
+- End-to-end governance principle for AI: same UC controls, lineage, and audit across data and AI assets: **GA**
+
+
 |||
 |---|---|
 title | Your guide to fine-grained access control: Permissions, ABAC, and RBAC in Unity Catalog
